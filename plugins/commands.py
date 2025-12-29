@@ -55,6 +55,14 @@ async def del_stk(s):
     except:
         pass
 
+async def auto_delete_message(msg, delay):
+    """Auto delete message after delay"""
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except:
+        pass
+
 # ─────────────────────────
 # /start
 # ─────────────────────────
@@ -180,46 +188,143 @@ Archive   {progress_bar(archive,total)} {archive}
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
 # ─────────────────────────
-# FILE → WATCH / DOWNLOAD
+# FILE CLICK HANDLER (जब user file result पर click करे)
+# ─────────────────────────
+@Client.on_callback_query(filters.regex(r"^files#|^file#"))
+async def send_file(client, query):
+    """Handle file button clicks from search results"""
+    try:
+        # Extract file_id from callback data (supports both files# and file#)
+        ident, file_id = query.data.split("#", 1)
+        
+        # Get file details from database
+        files = await get_file_details(file_id)
+        
+        if not files:
+            return await query.answer("❌ File not found in database!", show_alert=True)
+        
+        # Answer callback to remove loading
+        await query.answer()
+        
+        # Get first file (in case multiple files returned)
+        file = files[0] if isinstance(files, list) else files
+        
+        # Get file info
+        file_name = file.get('file_name', 'Unknown File')
+        file_size = get_size(file.get('file_size', 0))
+        file_caption = file.get('caption', '')
+        
+        # Build caption
+        caption = f"📁 <b>{file_name}</b>\n\n"
+        caption += f"📊 <b>Size:</b> {file_size}\n"
+        if file_caption:
+            caption += f"\n{file_caption}"
+        
+        # Create buttons with streaming option
+        buttons = [
+            [
+                InlineKeyboardButton("▶️ Watch / Download", callback_data=f"stream#{file_id}")
+            ],
+            [
+                InlineKeyboardButton("❌ Close", callback_data="close_data")
+            ]
+        ]
+        
+        # Send file with buttons
+        sent_msg = await client.send_cached_media(
+            chat_id=query.message.chat.id,
+            file_id=file.get('file_id'),
+            caption=caption,
+            parse_mode=enums.ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_to_message_id=query.message.id
+        )
+        
+        # Auto delete after PM_FILE_DELETE_TIME
+        if PM_FILE_DELETE_TIME and PM_FILE_DELETE_TIME > 0:
+            asyncio.create_task(auto_delete_message(sent_msg, PM_FILE_DELETE_TIME))
+                
+    except Exception as e:
+        print(f"❌ Error in send_file: {e}")
+        import traceback
+        traceback.print_exc()
+        await query.answer("❌ Error sending file! Check logs.", show_alert=True)
+
+# ─────────────────────────
+# STREAM BUTTON (Watch/Download button पर click करने पर)
 # ─────────────────────────
 @Client.on_callback_query(filters.regex(r"^stream#"))
 async def stream_cb(client, query):
-    file_id = query.data.split("#", 1)[1]
+    """Generate streaming and download links"""
+    try:
+        file_id = query.data.split("#", 1)[1]
+        
+        await query.answer("⏳ Generating links...", show_alert=False)
 
-    file = await get_file_details(file_id)
-    if not file:
-        return await query.answer("❌ File not found", show_alert=True)
+        # Get file details
+        files = await get_file_details(file_id)
+        if not files:
+            return await query.answer("❌ File not found!", show_alert=True)
+        
+        file = files[0] if isinstance(files, list) else files
+        
+        # Send file to BIN_CHANNEL to generate links
+        msg = await client.send_cached_media(
+            chat_id=BIN_CHANNEL,
+            file_id=file.get('file_id')
+        )
 
-    msg = await client.send_cached_media(
-        chat_id=BIN_CHANNEL,
-        file_id=file["_id"]
-    )
+        # Generate streaming links
+        online_link = f"{URL}watch/{msg.id}"
+        download_link = f"{URL}download/{msg.id}"
 
-    watch = f"{URL}watch/{msg.id}"
-    download = f"{URL}download/{msg.id}"
-
-    buttons = [
-        [
-            InlineKeyboardButton("▶️ Watch Online", url=watch),
-            InlineKeyboardButton("⬇️ Download", url=download)
-        ],
-        [
-            InlineKeyboardButton("❌ Close", callback_data="close_data")
+        # Create buttons with links
+        buttons = [
+            [
+                InlineKeyboardButton("▶️ Watch Online", url=online_link),
+                InlineKeyboardButton("⬇️ Download", url=download_link)
+            ],
+            [
+                InlineKeyboardButton("❌ Close", callback_data="close_data")
+            ]
         ]
-    ]
 
-    await query.message.reply(
-        "🎬 <b>Select option</b>",
-        reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode=enums.ParseMode.HTML
-    )
+        # Edit message with links
+        try:
+            await query.message.edit_reply_markup(
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+        except:
+            # If edit fails, send new message
+            await query.message.reply_text(
+                "🎬 <b>Your Links:</b>\n\n"
+                "▶️ Click <b>Watch Online</b> to stream\n"
+                "⬇️ Click <b>Download</b> to save",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode=enums.ParseMode.HTML
+            )
+        
+    except Exception as e:
+        print(f"❌ Error in stream_cb: {e}")
+        import traceback
+        traceback.print_exc()
+        await query.answer("❌ Error generating links!", show_alert=True)
 
 # ─────────────────────────
-# CLOSE
+# CLOSE BUTTON
 # ─────────────────────────
 @Client.on_callback_query(filters.regex("^close_data$"))
 async def close_cb(_, query):
+    """Delete message when close button is clicked"""
     try:
-        await query.message.delete()
-    except:
-        pass
+        if query.message:
+            await query.message.delete()
+            await query.answer("✅ Deleted", show_alert=False)
+        else:
+            await query.answer("Already deleted", show_alert=False)
+    except Exception as e:
+        print(f"Error in close_cb: {e}")
+        try:
+            await query.answer()
+        except:
+            pass
