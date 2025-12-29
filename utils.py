@@ -27,6 +27,7 @@ class temp(object):
     GROUPS_CANCEL = False
     BOT = None
     PREMIUM = {}
+    PM_FILES = {}
 
 
 # ─────────────────────────────────────────────
