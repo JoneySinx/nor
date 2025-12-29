@@ -5,7 +5,7 @@ import math
 from hydrogram.errors import ListenerTimeout
 from Script import script
 from datetime import datetime, timedelta
-from info import PICS, ADMINS, LOG_CHANNEL, DELETE_TIME, MAX_BTN
+from info import PICS, ADMINS, LOG_CHANNEL, DELETE_TIME, MAX_BTN, BIN_CHANNEL, URL
 from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
 from hydrogram import Client, filters, enums
 from utils import is_premium, get_size, is_check_admin, get_wish, get_readable_time, temp, get_settings, save_group_settings, is_subscribed
@@ -184,7 +184,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         except:
             pass
   
-None
+
 
     elif query.data == "buttons":
         await query.answer()
@@ -273,6 +273,24 @@ None
             return        
         await query.answer(url=f"https://t.me/{temp.U_NAME}?start=all_{query.message.chat.id}_{key}")
 
+    elif query.data.startswith("stream"):
+        file_id = query.data.split('#', 1)[1]
+        if not await is_premium(query.from_user.id, client):
+            return await query.answer(f"Only for premium users, use /plan for details", show_alert=True)
+        msg = await client.send_cached_media(chat_id=BIN_CHANNEL, file_id=file_id)
+        watch = f"{URL}watch/{msg.id}"
+        download = f"{URL}download/{msg.id}"
+        btn=[[
+            InlineKeyboardButton("ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ", url=watch),
+            InlineKeyboardButton("ꜰᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ", url=download)
+        ],[
+            InlineKeyboardButton('❌ ᴄʟᴏsᴇ ❌', callback_data='close_data')
+        ]]
+        reply_markup=InlineKeyboardMarkup(btn)
+        await query.edit_message_reply_markup(
+            reply_markup=reply_markup
+        )
+    
     elif query.data.startswith("delete"):
         _, query_ = query.data.split("_", 1)
         await query.message.edit('Deleting...')
