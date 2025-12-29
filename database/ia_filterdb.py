@@ -1,256 +1,228 @@
 import logging
-from struct import pack
 import re
 import base64
+from struct import pack
+
 from hydrogram.file_id import FileId
 from pymongo import MongoClient, TEXT
 from pymongo.errors import DuplicateKeyError
+
 from info import USE_CAPTION_FILTER, DATABASE_URL, DATABASE_NAME, MAX_BTN
 
 logger = logging.getLogger(__name__)
 
-# Single Database with 3 Collections
-client = MongoClient(DATABASE_URL)
+# ─────────────────────────────────────────
+# ⚙️ MONGODB CONNECTION (POOL OPTIMIZED)
+# ─────────────────────────────────────────
+client = MongoClient(
+    DATABASE_URL,
+    maxPoolSize=50,
+    minPoolSize=10,
+    maxIdleTimeMS=45000
+)
 db = client[DATABASE_NAME]
 
-# Three Collections
-primary_collection = db['Primary']
-cloud_collection = db['Cloud']
-archive_collection = db['Archive']
+primary = db["Primary"]
+cloud   = db["Cloud"]
+archive = db["Archive"]
 
-# Create indexes for all collections
-try:
-    primary_collection.create_index([("file_name", TEXT)])
-    cloud_collection.create_index([("file_name", TEXT)])
-    archive_collection.create_index([("file_name", TEXT)])
-    logger.info("Successfully created indexes for all collections")
-except Exception as e:
-    logger.exception(f"Error creating indexes: {e}")
+COLLECTIONS = {
+    "primary": primary,
+    "cloud": cloud,
+    "archive": archive
+}
 
+# ─────────────────────────────────────────
+# ⚡ INDEXES (ABSOLUTE MUST)
+# ─────────────────────────────────────────
+def ensure_indexes():
+    for name, col in COLLECTIONS.items():
+        col.create_index(
+            [("file_name", TEXT), ("caption", TEXT)],
+            name=f"{name}_text"
+        )
 
+ensure_indexes()
+
+# ─────────────────────────────────────────
+# 🧠 FAST NORMALIZER (NO CPU COST)
+# ─────────────────────────────────────────
+REPLACEMENTS = str.maketrans({
+    "0": "o", "1": "i", "3": "e",
+    "4": "a", "5": "s", "7": "t"
+})
+
+def normalize_query(q: str) -> str:
+    q = q.lower().translate(REPLACEMENTS)
+    q = re.sub(r"[^a-z0-9\s]", " ", q)
+    return re.sub(r"\s+", " ", q).strip()
+
+def prefix_query(q: str) -> str:
+    return " ".join(w[:4] for w in q.split() if len(w) >= 3)
+
+# ─────────────────────────────────────────
+# 📊 DB STATS (FAST)
+# ─────────────────────────────────────────
 def db_count_documents():
-    """Count documents in all collections"""
-    primary_count = primary_collection.count_documents({})
-    cloud_count = cloud_collection.count_documents({})
-    archive_count = archive_collection.count_documents({})
+    p = primary.estimated_document_count()
+    c = cloud.estimated_document_count()
+    a = archive.estimated_document_count()
     return {
-        'primary': primary_count,
-        'cloud': cloud_count,
-        'archive': archive_count,
-        'total': primary_count + cloud_count + archive_count
+        "primary": p,
+        "cloud": c,
+        "archive": a,
+        "total": p + c + a
     }
 
-
-async def save_file(media, collection_type='primary'):
-    """Save file in specified collection (primary/cloud/archive)"""
+# ─────────────────────────────────────────
+# 💾 SAVE FILE (FAST & SAFE)
+# ─────────────────────────────────────────
+async def save_file(media, collection_type="primary"):
     file_id = unpack_new_file_id(media.file_id)
-    file_name = re.sub(r"@\w+", "", str(media.file_name))
-    file_caption = re.sub(r"@\w+", "", str(media.caption)) if media.caption else ""
-    
-    document = {
-        '_id': file_id,
-        'file_name': file_name,
-        'file_size': media.file_size,
-        'caption': file_caption
+
+    doc = {
+        "_id": file_id,
+        "file_name": re.sub(r"@\w+", "", media.file_name or "").strip(),
+        "caption": re.sub(r"@\w+", "", media.caption or "").strip(),
+        "file_size": media.file_size
     }
-    
-    # Select collection based on type
-    if collection_type.lower() == 'cloud':
-        target_collection = cloud_collection
-    elif collection_type.lower() == 'archive':
-        target_collection = archive_collection
-    else:
-        target_collection = primary_collection
-    
+
+    col = COLLECTIONS.get(collection_type, primary)
+
     try:
-        target_collection.insert_one(document)
-        logger.info(f'Saved to {collection_type} - {file_name}')
-        return 'suc'
+        col.insert_one(doc)
+        return "suc"
     except DuplicateKeyError:
-        logger.warning(f'Already Saved in {collection_type} - {file_name}')
-        return 'dup'
+        return "dup"
 
+# ─────────────────────────────────────────
+# 🔍 ULTRA FAST SEARCH CORE
+# ─────────────────────────────────────────
+def _text_filter(q):
+    return {"$text": {"$search": q}}
 
-async def get_search_results(query, max_results=MAX_BTN, offset=0, lang=None, collection_type='all'):
-    """
-    Search in collections
-    collection_type: 'all', 'primary', 'cloud', 'archive'
-    """
-    query = str(query).strip()
-    if not query:
-        raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_])' + query + r'(\b|[\.\+\-_])'
-    else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
-    
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except:
-        regex = query
+def _search(col, q, offset, limit):
+    cursor = (
+        col.find(
+            _text_filter(q),
+            {
+                "file_name": 1,
+                "file_size": 1,
+                "caption": 1,
+                "score": {"$meta": "textScore"}
+            }
+        )
+        .sort([("score", {"$meta": "textScore"})])
+        .skip(offset)
+        .limit(limit)
+    )
+    docs = list(cursor)
+    count = col.count_documents(_text_filter(q))
+    return docs, count
 
-    if USE_CAPTION_FILTER:
-        filter = {'$or': [{'file_name': regex}, {'caption': regex}]}
-    else:
-        filter = {'file_name': regex}
+# ─────────────────────────────────────────
+# 🚀 PUBLIC SEARCH API (ULTRA FAST)
+# ─────────────────────────────────────────
+async def get_search_results(
+    query,
+    max_results=MAX_BTN,
+    offset=0,
+    lang=None,
+    collection_type="all"
+):
+    query = normalize_query(query)
+    prefix = prefix_query(query)
 
     results = []
-    
-    # Search based on collection_type
-    if collection_type == 'all':
-        # Search in all collections (Primary first)
-        cursor = primary_collection.find(filter)
-        results.extend([doc for doc in cursor])
-        
-        cursor2 = cloud_collection.find(filter)
-        results.extend([doc for doc in cursor2])
-        
-        cursor3 = archive_collection.find(filter)
-        results.extend([doc for doc in cursor3])
-        
-    elif collection_type == 'primary':
-        cursor = primary_collection.find(filter)
-        results = [doc for doc in cursor]
-        
-    elif collection_type == 'cloud':
-        cursor = cloud_collection.find(filter)
-        results = [doc for doc in cursor]
-        
-    elif collection_type == 'archive':
-        cursor = archive_collection.find(filter)
-        results = [doc for doc in cursor]
+    total = 0
 
-    # Language filter if specified
+    cols = (
+        [COLLECTIONS[collection_type]]
+        if collection_type in COLLECTIONS
+        else [primary, cloud, archive]
+    )
+
+    # 1️⃣ TEXT SEARCH (MAIN)
+    for col in cols:
+        need = max_results - len(results)
+        if need <= 0:
+            break
+
+        docs, cnt = _search(col, query, offset, need)
+        results.extend(docs)
+        total += cnt
+
+    # 2️⃣ PREFIX FALLBACK (ONLY IF EMPTY)
+    if not results and prefix:
+        for col in cols:
+            docs, cnt = _search(col, prefix, 0, max_results)
+            results.extend(docs)
+            total += cnt
+            if results:
+                break
+
+    # 3️⃣ LANG FILTER (VERY SMALL LOOP)
     if lang:
-        lang_files = [file for file in results if lang.lower() in file['file_name'].lower()]
-        files = lang_files[offset:][:max_results]
-        total_results = len(lang_files)
-        next_offset = offset + max_results
-        if next_offset >= total_results:
-            next_offset = ''
-        return files, next_offset, total_results
+        lang = lang.lower()
+        results = [f for f in results if lang in f["file_name"].lower()]
+        total = len(results)
 
-    total_results = len(results)
-    files = results[offset:][:max_results]
     next_offset = offset + max_results
-    if next_offset >= total_results:
-        next_offset = ''   
-    return files, next_offset, total_results
+    if next_offset >= total:
+        next_offset = ""
 
+    return results, next_offset, total
 
-async def delete_files(query, collection_type='all'):
-    """Delete files from specified collection(s)"""
-    query = query.strip()
-    if not query:
-        raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_])' + query + r'(\b|[\.\+\-_])'
-    else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
-    
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except:
-        regex = query
-        
-    filter = {'file_name': regex}
-    
-    total_deleted = 0
-    
-    if collection_type == 'all':
-        result1 = primary_collection.delete_many(filter)
-        result2 = cloud_collection.delete_many(filter)
-        result3 = archive_collection.delete_many(filter)
-        total_deleted = result1.deleted_count + result2.deleted_count + result3.deleted_count
-        
-    elif collection_type == 'primary':
-        result = primary_collection.delete_many(filter)
-        total_deleted = result.deleted_count
-        
-    elif collection_type == 'cloud':
-        result = cloud_collection.delete_many(filter)
-        total_deleted = result.deleted_count
-        
-    elif collection_type == 'archive':
-        result = archive_collection.delete_many(filter)
-        total_deleted = result.deleted_count
-    
-    return total_deleted
+# ─────────────────────────────────────────
+# 🗑 DELETE (FAST)
+# ─────────────────────────────────────────
+async def delete_files(query, collection_type="all"):
+    query = normalize_query(query)
+    flt = _text_filter(query)
+    deleted = 0
 
+    for name, col in COLLECTIONS.items():
+        if collection_type != "all" and name != collection_type:
+            continue
+        deleted += col.delete_many(flt).deleted_count
 
-async def get_file_details(query):
-    """Get file details from any collection"""
-    # Search in Primary first
-    file_details = primary_collection.find_one({'_id': query})
-    if file_details:
-        return file_details
-    
-    # Search in Cloud
-    file_details = cloud_collection.find_one({'_id': query})
-    if file_details:
-        return file_details
-    
-    # Search in Archive
-    file_details = archive_collection.find_one({'_id': query})
-    return file_details
+    return deleted
 
+# ─────────────────────────────────────────
+# 📂 FILE DETAILS
+# ─────────────────────────────────────────
+async def get_file_details(file_id):
+    for col in COLLECTIONS.values():
+        doc = col.find_one({"_id": file_id})
+        if doc:
+            return doc
+    return None
 
+# ─────────────────────────────────────────
+# 🔁 MOVE FILES (SAFE)
+# ─────────────────────────────────────────
 async def move_files(query, from_collection, to_collection):
-    """Move files from one collection to another"""
-    query = query.strip()
-    if not query:
-        raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_])' + query + r'(\b|[\.\+\-_])'
-    else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
-    
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except:
-        regex = query
-        
-    filter = {'file_name': regex}
-    
-    # Select source collection
-    if from_collection.lower() == 'cloud':
-        source = cloud_collection
-    elif from_collection.lower() == 'archive':
-        source = archive_collection
-    else:
-        source = primary_collection
-    
-    # Select destination collection
-    if to_collection.lower() == 'cloud':
-        destination = cloud_collection
-    elif to_collection.lower() == 'archive':
-        destination = archive_collection
-    else:
-        destination = primary_collection
-    
-    # Find files to move
-    files = list(source.find(filter))
-    moved_count = 0
-    
-    for file in files:
+    query = normalize_query(query)
+    src = COLLECTIONS[from_collection]
+    dst = COLLECTIONS[to_collection]
+
+    moved = 0
+    for doc in src.find(_text_filter(query)):
         try:
-            # Insert in destination
-            destination.insert_one(file)
-            # Delete from source
-            source.delete_one({'_id': file['_id']})
-            moved_count += 1
+            dst.insert_one(doc)
         except DuplicateKeyError:
-            # If already exists in destination, just delete from source
-            source.delete_one({'_id': file['_id']})
-            moved_count += 1
-    
-    return moved_count
+            pass
+        src.delete_one({"_id": doc["_id"]})
+        moved += 1
 
+    return moved
 
+# ─────────────────────────────────────────
+# 🔐 FILE ID UTILS
+# ─────────────────────────────────────────
 def encode_file_id(s: bytes) -> str:
-    r = b""
-    n = 0
-    for i in s + bytes([22]) + bytes([4]):
+    r, n = b"", 0
+    for i in s + bytes([22, 4]):
         if i == 0:
             n += 1
         else:
@@ -260,16 +232,12 @@ def encode_file_id(s: bytes) -> str:
             r += bytes([i])
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
 
-
 def unpack_new_file_id(new_file_id):
-    decoded = FileId.decode(new_file_id)
-    file_id = encode_file_id(
-        pack(
-            "<iiqq",
-            int(decoded.file_type),
-            decoded.dc_id,
-            decoded.media_id,
-            decoded.access_hash
-        )
-    )
-    return file_id
+    d = FileId.decode(new_file_id)
+    return encode_file_id(pack(
+        "<iiqq",
+        int(d.file_type),
+        d.dc_id,
+        d.media_id,
+        d.access_hash
+    ))
