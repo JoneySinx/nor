@@ -2,9 +2,9 @@ import random
 import os
 import sys
 from hydrogram import Client, filters, enums
-from hydrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatJoinRequest
+from hydrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from hydrogram.errors.exceptions.bad_request_400 import MessageTooLong
-from info import ADMINS, LOG_CHANNEL, PICS, SUPPORT_LINK, UPDATES_LINK
+from info import ADMINS, LOG_CHANNEL, PICS
 from database.users_chats_db import db
 from utils import temp, get_settings
 from Script import script
@@ -17,13 +17,12 @@ async def welcome(bot, message):
     
     if message.new_chat_member and not message.old_chat_member:
         if message.new_chat_member.user.id == temp.ME:
-            buttons = [[
-                InlineKeyboardButton('ᴜᴘᴅᴀᴛᴇ', url=UPDATES_LINK),
-                InlineKeyboardButton('ꜱᴜᴘᴘᴏʀᴛ', url=SUPPORT_LINK)
-            ]]
-            reply_markup=InlineKeyboardMarkup(buttons)
             user = message.from_user.mention if message.from_user else "Dear"
-            await bot.send_photo(chat_id=message.chat.id, photo=random.choice(PICS), caption=f"👋 Hello {user},\n\nThank you for adding me to the <b>'{message.chat.title}'</b> group, Don't forget to make me admin. If you want to know more ask the support group. 😘</b>", reply_markup=reply_markup)
+            await bot.send_photo(
+                chat_id=message.chat.id, 
+                photo=random.choice(PICS), 
+                caption=f"👋 Hello {user},\n\nThank you for adding me to the <b>'{message.chat.title}'</b> group, Don't forget to make me admin."
+            )
             if not await db.get_chat(message.chat.id):
                 total = await bot.get_chat_members_count(message.chat.id)
                 username = f'@{message.chat.username}' if message.chat.username else 'Private'
@@ -63,14 +62,9 @@ async def leave_a_chat(bot, message):
     except:
         chat = chat
     try:
-        buttons = [[
-            InlineKeyboardButton('Support Group', url=SUPPORT_LINK)
-        ]]
-        reply_markup=InlineKeyboardMarkup(buttons)
         await bot.send_message(
             chat_id=chat,
-            text=f'Hello Friends,\nMy owner has told me to leave from group so i go! If you need add me again contact my support group.\nReason - <code>{reason}</code>',
-            reply_markup=reply_markup,
+            text=f'Hello Friends,\nMy owner has told me to leave from group so i go!\nReason - <code>{reason}</code>',
         )
         await bot.leave_chat(chat)
         await message.reply(f"<b>✅️ Successfully bot left from this group - `{chat}`</b>")
@@ -101,14 +95,9 @@ async def disable_chat(bot, message):
     temp.BANNED_CHATS.append(int(chat_))
     await message.reply('Chat successfully disabled')
     try:
-        buttons = [[
-            InlineKeyboardButton('Support Group', url=SUPPORT_LINK)
-        ]]
-        reply_markup=InlineKeyboardMarkup(buttons)
         await bot.send_message(
             chat_id=chat_, 
-            text=f'Hello Friends,\nMy owner has told me to leave from group so i go! If you need add me again contact my support group.\nReason - <code>{reason}</code>',
-            reply_markup=reply_markup)
+            text=f'Hello Friends,\nMy owner has told me to leave from group so i go!\nReason - <code>{reason}</code>')
         await bot.leave_chat(chat_)
     except Exception as e:
         await message.reply(f"Error - {e}")
@@ -209,8 +198,6 @@ async def list_users(bot, message):
         out += f"**Name:** {user['name']}\n**ID:** `{user['id']}`"
         if user['ban_status']['is_banned']:
             out += ' (Banned User)'
-        if user['verify_status']['is_verified']:
-            out += ' (Verified User)'
         out += '\n\n'
     try:
         await raju.edit_text(out)
@@ -239,17 +226,3 @@ async def list_chats(bot, message):
         await message.reply_document('chats.txt', caption="List of chats")
         await raju.delete()
         os.remove('chats.txt')
-
-
-@Client.on_chat_join_request()
-async def join_reqs(client, message: ChatJoinRequest):
-    stg = db.get_bot_sttgs()
-    if message.chat.id == int(stg.get('REQUEST_FORCE_SUB_CHANNELS')):
-        if not db.find_join_req(message.from_user.id):
-            db.add_join_req(message.from_user.id)
-
-
-@Client.on_message(filters.command("delreq") & filters.private & filters.user(ADMINS))
-async def del_requests(client, message):
-    db.del_join_req()
-    await message.reply('Deleted join requests')
