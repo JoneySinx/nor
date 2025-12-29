@@ -36,7 +36,8 @@ from utils import (
     is_check_admin,
     temp,
     get_readable_time,
-    get_wish
+    get_wish,
+    get_premium_button
 )
 
 # ─────────────────────────
@@ -103,6 +104,7 @@ async def start(client, message):
         except:
             pass
 
+    # ✅ Add user to database
     if not await db.is_user_exist(message.from_user.id):
         await db.add_user(message.from_user.id, message.from_user.first_name)
         await client.send_message(
@@ -113,16 +115,32 @@ async def start(client, message):
             )
         )
 
-    if not await is_premium(message.from_user.id, client) and message.from_user.id not in ADMINS:
+    # ✅ Premium check (synced with Premium.py)
+    if IS_PREMIUM and not await is_premium(message.from_user.id, client):
         return await message.reply_photo(
             random.choice(PICS),
-            caption="❌ This bot is only for Premium users and Admins!",
+            caption="🔒 <b>Premium Required</b>\n\n"
+                    "This bot is only for Premium users!\n\n"
+                    "Use /plan to activate premium subscription.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    "🤑 Buy Premium",
-                    url=f"https://t.me/{temp.U_NAME}?start=premium"
-                )
-            ]])
+                InlineKeyboardButton("💎 Buy Premium", callback_data="activate_plan")
+            ]]),
+            parse_mode=enums.ParseMode.HTML
+        )
+
+    # Handle /start premium (from button clicks)
+    if len(message.command) > 1 and message.command[1] == "premium":
+        return await message.reply_photo(
+            random.choice(PICS),
+            caption=script.PLAN_TXT.format(
+                "Contact admin for pricing",
+                temp.U_NAME
+            ) if hasattr(script, 'PLAN_TXT') else "💎 Premium Plans\n\nContact admin for details.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💎 Activate Plan", callback_data="activate_plan")],
+                [InlineKeyboardButton("📊 My Plan", callback_data="myplan")]
+            ]),
+            parse_mode=enums.ParseMode.HTML
         )
 
     # Handle /start with file_id parameter
@@ -221,6 +239,9 @@ async def start(client, message):
                 [
                     InlineKeyboardButton("👨‍🚒 HELP", callback_data="help"),
                     InlineKeyboardButton("📚 ABOUT", callback_data="about")
+                ],
+                [
+                    InlineKeyboardButton("💎 PREMIUM", callback_data="myplan")
                 ]
             ])
         )
@@ -436,6 +457,52 @@ async def confirm_delete_cb(client, query):
 async def cancel_delete_cb(client, query):
     await query.message.edit_text(
         "❌ <b>Cancelled</b>",
+        parse_mode=enums.ParseMode.HTML
+    )
+
+# ─────────────────────────
+# CALLBACK: My Plan
+# ─────────────────────────
+@Client.on_callback_query(filters.regex("^myplan$"))
+async def myplan_cb(client, query):
+    """Handle myplan button callback"""
+    from plugins.Premium import TRIAL_ENABLED
+    
+    if not IS_PREMIUM:
+        return await query.answer('Premium feature was disabled by admin', show_alert=True)
+    
+    mp = db.get_plan(query.from_user.id)
+    
+    if not await is_premium(query.from_user.id, client):
+        btn = []
+        
+        # Only show trial button if enabled
+        if TRIAL_ENABLED:
+            btn.append([
+                InlineKeyboardButton('🎁 Activate Trial', callback_data='activate_trial'),
+                InlineKeyboardButton('💎 Activate Plan', callback_data='activate_plan')
+            ])
+        else:
+            btn.append([
+                InlineKeyboardButton('💎 Activate Plan', callback_data='activate_plan')
+            ])
+        
+        return await query.message.edit_text(
+            '❌ You dont have any premium plan.\n\nUse /plan to activate premium subscription.', 
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
+    
+    expire_time = mp['expire']
+    time_left = expire_time - datetime.now()
+    days_left = time_left.days
+    hours_left = time_left.seconds // 3600
+    
+    await query.message.edit_text(
+        f"✅ <b>Your Premium Status</b>\n\n"
+        f"📦 Plan: {mp['plan']}\n"
+        f"⏰ Expires: {expire_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏳ Time Left: {days_left} days {hours_left} hours\n\n"
+        f"💡 Use /plan to extend your subscription.",
         parse_mode=enums.ParseMode.HTML
     )
 
