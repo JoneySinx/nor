@@ -36,7 +36,8 @@ class Database:
         "auto_delete": AUTO_DELETE,
         "welcome": WELCOME,
         "welcome_text": WELCOME_TEXT,
-        "caption": FILE_CAPTION
+        "caption": FILE_CAPTION,
+        "search_enabled": True  # ✅ Default: Search ON
     }
 
     # ✅ Enhanced default premium settings (synced with Premium.py)
@@ -152,7 +153,13 @@ class Database:
 
     async def get_settings(self, group_id):
         grp = self.groups.find_one({"id": int(group_id)})
-        return grp.get("settings", self.default_setgs) if grp else self.default_setgs
+        if grp:
+            settings = grp.get("settings", self.default_setgs)
+            # ✅ Ensure search_enabled exists in old groups
+            if "search_enabled" not in settings:
+                settings["search_enabled"] = True
+            return settings
+        return self.default_setgs
 
     # ───────── PREMIUM (Enhanced for Premium.py) ─────────
     def get_plan(self, user_id):
