@@ -5,6 +5,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 logging.getLogger('hydrogram').setLevel(logging.ERROR)
+
+# ✅ UptimeRobot और aiohttp के access logs को hide करें
+logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
+logging.getLogger('aiohttp.server').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 import os
@@ -86,8 +91,8 @@ class Bot(Client):
         temp.U_NAME = me.username
         temp.B_NAME = me.first_name
         
-        # Web server (stream / health check)
-        runner = web.AppRunner(web_app)
+        # Web server (stream / health check) - without access logs
+        runner = web.AppRunner(web_app, access_log=None)
         await runner.setup()
         await web.TCPSite(runner, "0.0.0.0", PORT).start()
         
