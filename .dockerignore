@@ -1,8 +1,6 @@
-# Git files
-.git
-.gitignore
-.gitattributes
-.github/
+# ==========================================
+# 📦 .dockerignore
+# ==========================================
 
 # Python cache
 __pycache__/
@@ -10,105 +8,79 @@ __pycache__/
 *$py.class
 *.so
 .Python
-*.pyo
-*.pyd
-.pytype/
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pytest_cache/
-.coverage
-htmlcov/
 
 # Virtual environments
 venv/
 env/
 ENV/
-.venv/
-virtualenv/
-pipenv/
+.venv
 
-# IDE & Editors
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-*.sublime-project
 
-# Documentation
-README.md
-*.md
-docs/
-LICENSE
-CONTRIBUTING.md
-
-# Logs & Temporary
-*.log
-logs/
-*.tmp
-.DS_Store
-Thumbs.db
-restart.txt
-*.bak
-*.cache
-
-# Database (if local)
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
+# Git
+.git/
+.gitignore
+.gitattributes
 
 # Docker
 Dockerfile*
-docker-compose*.yml
 .dockerignore
-.docker/
+docker-compose*.yml
+
+# Documentation
+*.md
+README*
+LICENSE
+docs/
 
 # CI/CD
 .github/
 .gitlab-ci.yml
 .travis.yml
-.circleci/
-azure-pipelines.yml
-Jenkinsfile
 
-# Testing
+# Logs & temp files
+*.log
+*.txt
+!requirements.txt
+*.tmp
+*.temp
+restart.txt
+
+# Database files (if any)
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment files (security)
+.env
+.env.*
+*.pem
+*.key
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test files
 tests/
-test/
-*.test.py
+test_*.py
+*_test.py
 pytest.ini
-tox.ini
-.tox/
+.pytest_cache/
 
 # Build artifacts
 build/
 dist/
 *.egg-info/
-*.egg
 .eggs/
 
-# Environment files (SECURITY!)
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.crt
-config.ini
-
-# OS specific
-desktop.ini
-ehthumbs.db
-Icon?
-
-# Backup files
-*.backup
-*.old
-*.orig
+# Media (if not needed)
+downloads/
+TelegramBot.session
+TelegramBot.session-journal
