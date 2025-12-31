@@ -42,6 +42,25 @@ async def pm_search(client, message):
     if message.text.startswith("/"):
         return
 
+    # ❌ Ignore forwarded messages
+    if message.forward_date:
+        return
+    
+    # ❌ Ignore messages with media
+    if message.photo or message.video or message.document or message.audio or message.voice or message.sticker or message.animation:
+        return
+    
+    # ❌ Ignore messages with links
+    if message.entities:
+        for entity in message.entities:
+            if entity.type in ["url", "text_link", "mention", "text_mention"]:
+                return
+    
+    # ❌ Ignore emoji-only messages (messages without alphanumeric characters)
+    text = message.text.strip()
+    if not any(c.isalnum() for c in text):
+        return
+
     # ✅ Premium check (synced with Premium.py)
     if IS_PREMIUM and not await is_premium(message.from_user.id, client):
         return await message.reply_photo(
@@ -72,6 +91,25 @@ async def group_search(client, message):
         return
 
     if message.text.startswith("/"):
+        return
+
+    # ❌ Ignore forwarded messages
+    if message.forward_date:
+        return
+    
+    # ❌ Ignore messages with media
+    if message.photo or message.video or message.document or message.audio or message.voice or message.sticker or message.animation:
+        return
+    
+    # ❌ Ignore messages with links
+    if message.entities:
+        for entity in message.entities:
+            if entity.type in ["url", "text_link", "mention", "text_mention"]:
+                return
+    
+    # ❌ Ignore emoji-only messages (messages without alphanumeric characters)
+    text = message.text.strip()
+    if not any(c.isalnum() for c in text):
         return
 
     # ✅ Check if search is enabled in this group
