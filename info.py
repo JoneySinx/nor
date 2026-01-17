@@ -118,7 +118,7 @@ PM_FILE_DELETE_TIME = int(environ.get("PM_FILE_DELETE_TIME", 3600))
 # ─────────────────────────────────────────────
 # 🧩 FEATURE FLAGS (CLEAN)
 # ─────────────────────────────────────────────
-USE_CAPTION_FILTER = is_enabled("USE_CAPTION_FILTER", False)
+USE_CAPTION_FILTER = is_enabled("USE_CAPTION_FILTER", True)
 AUTO_DELETE = is_enabled("AUTO_DELETE", False)
 WELCOME = is_enabled("WELCOME", False)
 PROTECT_CONTENT = is_enabled("PROTECT_CONTENT", False)

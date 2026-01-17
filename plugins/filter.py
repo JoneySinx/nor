@@ -42,6 +42,25 @@ async def pm_search(client, message):
     if message.text.startswith("/"):
         return
 
+    # ❌ Ignore forwarded messages
+    if message.forward_date:
+        return
+    
+    # ❌ Ignore messages with media
+    if message.photo or message.video or message.document or message.audio or message.voice or message.sticker or message.animation:
+        return
+    
+    # ❌ Ignore messages with links
+    if message.entities:
+        for entity in message.entities:
+            if entity.type in ["url", "text_link", "mention", "text_mention"]:
+                return
+    
+    # ❌ Ignore emoji-only messages (messages without alphanumeric characters)
+    text = message.text.strip()
+    if not any(c.isalnum() for c in text):
+        return
+
     # ✅ Premium check (synced with Premium.py)
     if IS_PREMIUM and not await is_premium(message.from_user.id, client):
         return await message.reply_photo(
@@ -56,8 +75,8 @@ async def pm_search(client, message):
             parse_mode=enums.ParseMode.HTML
         )
 
-    # Direct ultra-fast search
-    await auto_filter(client, message, collection_type="primary")
+    # Direct ultra-fast search with CASCADE
+    await auto_filter(client, message, collection_type="all")
 
 
 # ─────────────────────────────────────────────
@@ -72,6 +91,25 @@ async def group_search(client, message):
         return
 
     if message.text.startswith("/"):
+        return
+
+    # ❌ Ignore forwarded messages
+    if message.forward_date:
+        return
+    
+    # ❌ Ignore messages with media
+    if message.photo or message.video or message.document or message.audio or message.voice or message.sticker or message.animation:
+        return
+    
+    # ❌ Ignore messages with links
+    if message.entities:
+        for entity in message.entities:
+            if entity.type in ["url", "text_link", "mention", "text_mention"]:
+                return
+    
+    # ❌ Ignore emoji-only messages (messages without alphanumeric characters)
+    text = message.text.strip()
+    if not any(c.isalnum() for c in text):
         return
 
     # ✅ Check if search is enabled in this group
@@ -109,8 +147,8 @@ async def group_search(client, message):
         await message.delete()
         return await message.reply("Links not allowed here!")
 
-    # Direct ultra-fast search
-    await auto_filter(client, message, collection_type="primary")
+    # Direct ultra-fast search with CASCADE
+    await auto_filter(client, message, collection_type="all")
 
 
 # ─────────────────────────────────────────────
@@ -202,13 +240,16 @@ async def navigate_page(bot, query):
     if not search:
         return await query.answer("Search expired!", show_alert=True)
 
-    # Get results
-    files, next_offset, total = await get_search_results(
+    # Get results - NOW WITH 4 RETURN VALUES
+    files, next_offset, total, actual_source = await get_search_results(
         search,
         max_results=MAX_BTN,
         offset=offset,
         collection_type=collection_type
     )
+    
+    # Use actual source for display
+    collection_type = actual_source
     
     if not files:
         return await query.answer("No more results!", show_alert=True)
@@ -258,7 +299,7 @@ async def navigate_page(bot, query):
     
     buttons.append(nav_row)
 
-    # Collection row
+    # Collection row - ALWAYS SHOW
     coll_row = []
     for coll in ["primary", "cloud", "archive"]:
         emoji = "✅" if coll == collection_type else "📂"
@@ -313,13 +354,16 @@ async def switch_collection(bot, query):
     if not search:
         return await query.answer("Search expired!", show_alert=True)
 
-    # Search in new collection from start
-    files, next_offset, total = await get_search_results(
+    # Search in new collection from start - NOW WITH 4 RETURN VALUES
+    files, next_offset, total, actual_source = await get_search_results(
         search,
         max_results=MAX_BTN,
         offset=0,
         collection_type=collection_type
     )
+    
+    # Use actual source for display
+    collection_type = actual_source
     
     if not files:
         return await query.answer(f"No results in {collection_type.upper()}!", show_alert=True)
@@ -357,7 +401,7 @@ async def switch_collection(bot, query):
     
     buttons.append(nav_row)
 
-    # Collection row
+    # Collection row - ALWAYS SHOW
     coll_row = []
     for coll in ["primary", "cloud", "archive"]:
         emoji = "✅" if coll == collection_type else "📂"
@@ -401,14 +445,14 @@ async def pages_cb(bot, query):
 # ─────────────────────────────────────────────
 # 🚀 AUTO FILTER CORE - ULTRA FAST
 # ─────────────────────────────────────────────
-async def auto_filter(client, msg, collection_type="primary"):
+async def auto_filter(client, msg, collection_type="all"):
     message = msg
     settings = await get_settings(message.chat.id)
 
     search = message.text.strip()
     
-    # Ultra-fast direct search (NO intermediate message)
-    files, next_offset, total = await get_search_results(
+    # Ultra-fast direct search (NO intermediate message) - NOW WITH 4 RETURN VALUES
+    files, next_offset, total, actual_source = await get_search_results(
         search,
         max_results=MAX_BTN,
         offset=0,
@@ -439,7 +483,7 @@ async def auto_filter(client, msg, collection_type="primary"):
     cap = (
         f"<b>👑 Search: {search}\n"
         f"🎬 Total: {total}\n"
-        f"📚 Source: {collection_type.upper()}\n"
+        f"📚 Source: {actual_source.upper()}\n"
         f"📄 Page: 1/{total_pages}</b>\n\n"
     )
 
@@ -451,15 +495,15 @@ async def auto_filter(client, msg, collection_type="primary"):
     
     if next_offset:
         nav_row.append(
-            InlineKeyboardButton("ɴᴇxᴛ »", callback_data=f"nav_{message.from_user.id}_{key}_{next_offset}_{collection_type}")
+            InlineKeyboardButton("ɴᴇxᴛ »", callback_data=f"nav_{message.from_user.id}_{key}_{next_offset}_{actual_source}")
         )
     
     buttons.append(nav_row)
 
-    # Collection row
+    # Collection row - ALWAYS SHOW
     coll_row = []
     for coll in ["primary", "cloud", "archive"]:
-        emoji = "✅" if coll == collection_type else "📂"
+        emoji = "✅" if coll == actual_source else "📂"
         coll_row.append(
             InlineKeyboardButton(
                 f"{emoji} {coll.upper()[:3]}",

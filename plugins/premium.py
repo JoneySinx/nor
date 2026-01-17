@@ -5,7 +5,6 @@ import asyncio
 from datetime import datetime, timedelta
 from hydrogram import Client, filters, enums
 from hydrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
-from hydrogram.errors import ListenerTimeout
 from database.users_chats_db import db
 from info import (
     IS_PREMIUM, 
@@ -591,7 +590,7 @@ async def activate_plan_callback(client: Client, query: CallbackQuery):
             user_id=query.from_user.id,
             timeout=300
         )
-    except ListenerTimeout:
+    except (asyncio.TimeoutError, TimeoutError, Exception) as e:
         await q.delete()
         return await query.message.reply('⏰ Timeout! Please try again using /plan')
     
@@ -637,7 +636,7 @@ async def activate_plan_callback(client: Client, query: CallbackQuery):
             user_id=query.from_user.id, 
             timeout=600
         )
-    except ListenerTimeout:
+    except (asyncio.TimeoutError, TimeoutError, Exception) as e:
         await q.delete()
         return await query.message.reply(
             f'⏰ <b>Timeout!</b>\n\n'

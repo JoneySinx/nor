@@ -159,7 +159,7 @@ def _search(col, q, offset, limit):
         return [], 0
 
 # ─────────────────────────────────────────
-# 🚀 PUBLIC SEARCH API (ULTRA FAST)
+# 🚀 PUBLIC SEARCH API (ULTRA FAST CASCADE)
 # ─────────────────────────────────────────
 async def get_search_results(
     query,
@@ -169,7 +169,7 @@ async def get_search_results(
     collection_type="primary"
 ):
     """
-    Main search function
+    Main search function with intelligent cascade
     
     Args:
         query: Search query string
@@ -193,33 +193,65 @@ async def get_search_results(
     results = []
     total = 0
 
-    # Select collections
-    if collection_type in COLLECTIONS:
-        cols = [COLLECTIONS[collection_type]]
-    else:
-        cols = [primary, cloud, archive]
-
-    # 1️⃣ TEXT SEARCH (MAIN)
-    for col in cols:
-        need = max_results - len(results)
-        if need <= 0:
-            break
-
-        docs, cnt = _search(col, query, offset, need)
+    # ⚡ CASCADE SEARCH: Primary → Cloud → Archive
+    # Only searches next collection if previous returns 0 results
+    if collection_type == "all":
+        # 1️⃣ Try Primary first
+        docs, cnt = _search(primary, query, offset, max_results)
         results.extend(docs)
         total += cnt
-
-    # 2️⃣ PREFIX FALLBACK (ONLY IF EMPTY)
-    if not results and prefix:
-        for col in cols:
+        
+        # 2️⃣ If Primary has 0 results, try Cloud
+        if not results:
+            docs, cnt = _search(cloud, query, offset, max_results)
+            results.extend(docs)
+            total += cnt
+            
+            # 3️⃣ If Cloud also has 0 results, try Archive
+            if not results:
+                docs, cnt = _search(archive, query, offset, max_results)
+                results.extend(docs)
+                total += cnt
+                
+                # 4️⃣ If still no results, try prefix fallback in all collections
+                if not results and prefix:
+                    docs, cnt = _search(primary, prefix, 0, max_results)
+                    if docs:
+                        results.extend(docs)
+                        total += cnt
+                    else:
+                        docs, cnt = _search(cloud, prefix, 0, max_results)
+                        if docs:
+                            results.extend(docs)
+                            total += cnt
+                        else:
+                            docs, cnt = _search(archive, prefix, 0, max_results)
+                            results.extend(docs)
+                            total += cnt
+    
+    # Single collection search (old behavior)
+    elif collection_type in COLLECTIONS:
+        col = COLLECTIONS[collection_type]
+        
+        # Main search
+        docs, cnt = _search(col, query, offset, max_results)
+        results.extend(docs)
+        total += cnt
+        
+        # Prefix fallback if no results
+        if not results and prefix:
             docs, cnt = _search(col, prefix, 0, max_results)
             results.extend(docs)
             total += cnt
-            if results:
-                break
+    
+    else:
+        # Invalid collection type, default to primary
+        docs, cnt = _search(primary, query, offset, max_results)
+        results.extend(docs)
+        total += cnt
 
-    # 3️⃣ LANG FILTER (VERY SMALL LOOP)
-    if lang:
+    # 5️⃣ LANG FILTER (VERY SMALL LOOP)
+    if lang and results:
         lang = lang.lower()
         results = [f for f in results if lang in f["file_name"].lower()]
         total = len(results)
@@ -229,8 +261,21 @@ async def get_search_results(
     if next_offset >= total:
         next_offset = ""
 
-    # Silent - no logs for search
-    return results, next_offset, total
+    # ✅ Return which collection actually had results
+    actual_source = collection_type
+    if collection_type == "all" and results:
+        # Detect which collection the results came from
+        if total > 0:
+            # Check first result's _id in each collection to find source
+            first_id = results[0]["_id"]
+            if primary.find_one({"_id": first_id}):
+                actual_source = "primary"
+            elif cloud.find_one({"_id": first_id}):
+                actual_source = "cloud"
+            elif archive.find_one({"_id": first_id}):
+                actual_source = "archive"
+
+    return results, next_offset, total, actual_source
 
 # ─────────────────────────────────────────
 # 🗑 DELETE FILES (WITH LOGGING) ✅
