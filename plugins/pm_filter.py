@@ -35,33 +35,16 @@ import random
 BUTTONS = {}
 
 # ─────────────────────────────────────────────
-# 🔍 PRIVATE SEARCH (PREMIUM REQUIRED)
+# ⛔ PRIVATE SEARCH (DISABLED)
 # ─────────────────────────────────────────────
 @Client.on_message(filters.private & filters.text & filters.incoming)
 async def pm_search(client, message):
-    if message.text.startswith("/"):
-        return
-
-    # ✅ Premium check (synced with Premium.py)
-    if IS_PREMIUM and not await is_premium(message.from_user.id, client):
-        return await message.reply_photo(
-            random.choice(PICS),
-            caption="🔒 <b>Premium Required</b>\n\n"
-                    "Search feature is only available for Premium users!\n\n"
-                    "Use /plan to activate premium subscription.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("💎 Buy Premium", callback_data="activate_plan"),
-                InlineKeyboardButton("📊 My Plan", callback_data="myplan")
-            ]]),
-            parse_mode=enums.ParseMode.HTML
-        )
-
-    # Direct ultra-fast search
-    await auto_filter(client, message, collection_type="primary")
+    # PM में कोई भी टेक्स्ट भेजने पर सर्च नहीं होगा
+    return
 
 
 # ─────────────────────────────────────────────
-# 🔍 GROUP SEARCH (WITH ON/OFF CONTROL)
+# 🛡️ GROUP MANAGEMENT (SEARCH DISABLED)
 # ─────────────────────────────────────────────
 @Client.on_message(filters.group & filters.text & filters.incoming)
 async def group_search(client, message):
@@ -74,19 +57,7 @@ async def group_search(client, message):
     if message.text.startswith("/"):
         return
 
-    # ✅ Check if search is enabled in this group
-    settings = await get_settings(chat_id)
-    search_enabled = settings.get("search_enabled", True)  # Default: ON
-    
-    # If search is OFF, silently ignore all searches (no reply to anyone)
-    if not search_enabled:
-        return
-
-    # ✅ Premium check (synced with Premium.py)
-    if IS_PREMIUM and not await is_premium(user_id, client):
-        return
-
-    # admin mention handler
+    # admin mention handler (यह चालू रहेगा ताकि मेंबर्स एडमिन को बुला सकें)
     if "@admin" in message.text.lower() or "@admins" in message.text.lower():
         if await is_check_admin(client, chat_id, user_id):
             return
@@ -102,15 +73,15 @@ async def group_search(client, message):
         await message.reply_text("Report sent!" + hidden)
         return
 
-    # block links for non-admins
+    # block links for non-admins (यह चालू रहेगा ताकि स्पैम लिंक डिलीट हो सकें)
     if re.findall(r"https?://\S+|www\.\S+|t\.me/\S+|@\w+", message.text):
         if await is_check_admin(client, chat_id, user_id):
             return
         await message.delete()
         return await message.reply("Links not allowed here!")
 
-    # Direct ultra-fast search
-    await auto_filter(client, message, collection_type="primary")
+    # ⛔ ग्रुप में ऑटो-सर्च बंद कर दिया गया है
+    return 
 
 
 # ─────────────────────────────────────────────
